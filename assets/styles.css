@@ -1,0 +1,97 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap');
+
+.main { background: #0d1117; }
+html, body, [class*="css"]  { font-family: 'Inter', sans-serif; color: #e6edf3; }
+
+/* Header banner */
+.hero-banner {
+    background: linear-gradient(135deg, #1a3a4a 0%, #0d2333 50%, #121726 100%);
+    border: 1px solid #30363d;
+    border-radius: 12px;
+    padding: 30px 40px;
+    margin-bottom: 24px;
+}
+.hero-banner h1 { font-size: 2.2rem; font-weight: 700; color: #58a6ff; margin: 0 0 6px; }
+.hero-banner p  { color: #8b949e; font-size: 1rem; margin: 0; }
+
+/* Metric cards */
+.metric-card {
+    background: linear-gradient(135deg, #161b22, #1c2128);
+    border: 1px solid #30363d;
+    border-radius: 10px;
+    padding: 18px 22px;
+    text-align: center;
+}
+.metric-card .label { color: #f0f6fc; font-size: 0.78rem; text-transform: uppercase; letter-spacing: .08em; }
+.metric-card .value { font-size: 2rem; font-weight: 700; color: #58a6ff; }
+
+/* Risk boxes */
+.risk-high {
+    background: linear-gradient(135deg, #3d1515, #5c1a1a);
+    border: 2px solid #f85149;
+    border-radius: 14px;
+    padding: 28px;
+    text-align: center;
+}
+.risk-low {
+    background: linear-gradient(135deg, #0f3d1e, #1a5c2a);
+    border: 2px solid #3fb950;
+    border-radius: 14px;
+    padding: 28px;
+    text-align: center;
+}
+.risk-high h2, .risk-low h2 { font-size: 2rem; font-weight: 700; margin: 0 0 8px; }
+.risk-high h2 { color: #f85149; }
+.risk-low  h2 { color: #3fb950; }
+.risk-high p, .risk-low p   { color: #e6edf3; font-size: 1rem; margin: 0; }
+
+
+/* Probability bar */
+.prob-bar-container {
+    background: #21262d;
+    border-radius: 99px;
+    height: 22px;
+    overflow: hidden;
+    margin-top: 8px;
+}
+.prob-bar-fill {
+    height: 100%;
+    border-radius: 99px;
+    transition: width 0.4s ease;
+}
+
+/* Section headers */
+.section-header {
+    font-size: 1.15rem;
+    font-weight: 600;
+    color: #58a6ff;
+    border-left: 4px solid #1f6feb;
+    padding-left: 12px;
+    margin: 24px 0 14px;
+}
+
+/* Footer */
+.footer {
+    text-align: center;
+    color: #484f58;
+    font-size: 0.8rem;
+    padding: 30px 0 10px;
+    border-top: 1px solid #21262d;
+    margin-top: 40px;
+}
+
+/* Sidebar */
+[data-testid="stSidebar"] { background: #161b22 !important; }
+[data-testid="stSidebar"] .stSlider > label,
+[data-testid="stSidebar"] .stSelectbox > label,
+[data-testid="stSidebar"] .stNumberInput > label { color: #8b949e; font-size: 0.82rem; }
+
+/* Tab styling */
+.stTabs [data-baseweb="tab-list"] { gap: 8px; }
+.stTabs [data-baseweb="tab"] {
+    background: #161b22;
+    border-radius: 8px 8px 0 0;
+    color: #8b949e;
+    padding: 8px 18px;
+}
+.stTabs [aria-selected="true"] { background: #02398c !important; color: #fff !important; }
