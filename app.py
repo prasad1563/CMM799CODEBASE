@@ -37,7 +37,7 @@ BASE_DIR    = os.path.dirname(__file__)
 MODEL_DIR   = os.path.join(BASE_DIR, "models")
 FIG_DIR     = os.path.join(BASE_DIR, "reports", "figures", "MLModels")  # SHAP figures
 REPORT_DIR  = os.path.join(BASE_DIR, "reports", "figures")              # Ensemble evaluation figures
-MAP_DIR     = os.path.join(BASE_DIR, "scripts", "maps")
+MAP_DIR     = os.path.join(BASE_DIR, "reports", "maps")
 
 
 
