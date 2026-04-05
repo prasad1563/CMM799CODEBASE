@@ -37,7 +37,7 @@ BASE_DIR    = os.path.dirname(__file__)
 MODEL_DIR   = os.path.join(BASE_DIR, "models")
 FIG_DIR     = os.path.join(BASE_DIR, "reports", "figures", "MLModels")  # SHAP figures
 REPORT_DIR  = os.path.join(BASE_DIR, "reports", "figures")              # Ensemble evaluation figures
-MAP_DIR     = os.path.join(BASE_DIR, "reports", "maps")
+MAP_DIR     = os.path.join(BASE_DIR, "scripts", "03_Data_Modeling")
 
 
 
@@ -176,79 +176,82 @@ tab_pred, tab_perf, tab_shap, tab_about = st.tabs([
 # TAB 1 - PREDICTION
 # ============================================================================
 with tab_pred:
-    sb = st.sidebar
-    sb.markdown("## ⚙️ Input Parameters")
-    sb.markdown("---")
+    with st.expander("⚙️ Configure Parameters", expanded=True):
+        col1, col2, col3, col4 = st.columns([1, 1, 1, 1], gap="medium")
+        
+        with col1:
+            #  District & Time 
+            st.markdown("### 📍 Location & Month")
+            district = st.selectbox("District", DISTRICTS, index=DISTRICTS.index("Colombo")) ##default to colombo
+            month    = st.selectbox("Month", list(MONTH_NAMES.keys()),
+                                     format_func=lambda m: MONTH_NAMES[m], index=0) # and Jan
 
-    #  District & Time 
-    sb.markdown("### 📍 Location & Month")
-    district = sb.selectbox("District", DISTRICTS, index=DISTRICTS.index("Colombo")) ##default to colombo
-    month    = sb.selectbox("Month", list(MONTH_NAMES.keys()),
-                             format_func=lambda m: MONTH_NAMES[m], index=0) # and Jan
+            # Derived from district / month (uploaded a .csv with these values)
+            dist_risk = float(district_risk_rate.loc[district].values[0]) if district in district_risk_rate.index else 0.48
+            dist_enc  = int(le.transform([district])[0]) ## encoder
+            month_sin = math.sin(2 * math.pi * month / 12)
+            month_cos = math.cos(2 * math.pi * month / 12)
 
-    # Derived from district / month (uploaded a .csv with these values)
-    dist_risk = float(district_risk_rate.loc[district].values[0]) if district in district_risk_rate.index else 0.48
-    dist_enc  = int(le.transform([district])[0]) ## encoder
-    month_sin = math.sin(2 * math.pi * month / 12)
-    month_cos = math.cos(2 * math.pi * month / 12)
+            # Climate inputs
+            st.markdown("### 🌧️ Climate")
+            precip   = dual_input(col1, "Precipitation (mm)",   0.0,  820.0, 156.0, 1.0, "c_precip")
+            temp_min = dual_input(col1, "Min Temperature (°C)", 5.0,   28.0,  22.0, 0.1, "c_tmin")
+            temp_max = dual_input(col1, "Max Temperature (°C)", 19.0,  40.0,  31.4, 0.1, "c_tmax")
+            soil_moist = dual_input(col1, "Soil Moisture (m³/m³)", 0.0, 0.51, 0.33, 0.01, "c_soil")##(0 to 7 cm soil layer)
 
-    # Climate inputs
-    sb.markdown("### 🌧️ Climate")
-    precip   = dual_input(sb, "Precipitation (mm)",   0.0,  820.0, 156.0, 1.0, "c_precip")
-    temp_min = dual_input(sb, "Min Temperature (°C)", 5.0,   28.0,  22.0, 0.1, "c_tmin")
-    temp_max = dual_input(sb, "Max Temperature (°C)", 19.0,  40.0,  31.4, 0.1, "c_tmax")
-    soil_moist = dual_input(sb, "Soil Moisture (m³/m³)", 0.0, 0.51, 0.33, 0.01, "c_soil")##(0 to 7 cm soil layer)
+            mean_temp  = (temp_min + temp_max) / 2
+            temp_range = temp_max - temp_min
 
-    mean_temp  = (temp_min + temp_max) / 2
-    temp_range = temp_max - temp_min
+        with col2:
+            # Lag features
+            st.markdown("### 🕑 Lag / History")
+            hr_lag1  = col2.select_slider("High-Risk last month?",   options=[0, 1], value=0)
+            hr_lag2  = col2.select_slider("High-Risk 2 months ago?", options=[0, 1], value=0)
+            hr_roll3 = dual_input(col2, "3-month High-Risk rate (0-1)", 0.0, 1.0, 0.33, 0.3333, "c_hr3")
 
-    # Lag features
-    sb.markdown("### 🕑 Lag / History")
-    hr_lag1  = sb.select_slider("High-Risk last month?",   options=[0, 1], value=0)
-    hr_lag2  = sb.select_slider("High-Risk 2 months ago?", options=[0, 1], value=0)
-    hr_roll3 = dual_input(sb, "3-month High-Risk rate (0-1)", 0.0, 1.0, 0.33, 0.3333, "c_hr3")
+            # Agricultural / Socio-economic
+            st.markdown("### 🌾 Agriculture & Pop")
+            mrice_area  = col2.number_input("Maha Rice Area (ha)",    0, 120000, 26544)
+            mrice_yield = col2.number_input("Maha Rice Yield (kg/ha)",0,   7000,  3998)
+            srice_area  = col2.number_input("Yala Rice Area (ha)",    0,  70000, 14912)
+            srice_yield = col2.number_input("Yala Rice Yield (kg/ha)",0,   7000,  3699)
+            population  = col2.number_input("Population",          80000,2400000, 823742)
+            households  = col2.number_input("Households",          19000, 660000, 213132)
 
-    # Previous months precip / temp for lags (use same value as a simple default)
-    sb.markdown("### 🕑 Lagged Climate (prev months)")
-    precip_lag1 = dual_input(sb, "Precipitation lag-1 (mm)", 0.0, 820.0, precip, 1.0, "l_precip1")
-    precip_lag2 = dual_input(sb, "Precipitation lag-2 (mm)", 0.0, 820.0, precip, 1.0, "l_precip2")
-    precip_lag3 = dual_input(sb, "Precipitation lag-3 (mm)", 0.0, 820.0, precip, 1.0, "l_precip3")
+            pop_per_hh = population / max(households, 1)
 
-    tmin_lag1 = dual_input(sb, "Temp Min lag-1 (°C)", 5.0, 28.0, temp_min, 0.1, "l_tmin1")
-    tmin_lag2 = dual_input(sb, "Temp Min lag-2 (°C)", 5.0, 28.0, temp_min, 0.1, "l_tmin2")
-    tmin_lag3 = dual_input(sb, "Temp Min lag-3 (°C)", 5.0, 28.0, temp_min, 0.1, "l_tmin3")
+        with col3:
+            # BioClim 
+            st.markdown("### 🌍 Bio Climatic Vars")
+            BIO2  = dual_input(col3, "BIO2 - Diurnal Range (°C)",       4.0, 20.0, 9.0,  0.1, "b_2")
+            BIO3  = dual_input(col3, "BIO3 - Isothermality",            0.2,  0.7, 0.42, 0.01, "b_3")
+            BIO4  = dual_input(col3, "BIO4 - Temp Seasonality",         0.0,400.0, 90.0, 1.0, "b_4")
+            BIO13 = dual_input(col3, "BIO13 - Precip Wettest Month (mm)",0.0,500.0,230.0, 1.0, "b_13")
+            BIO14 = dual_input(col3, "BIO14 - Precip Driest Month (mm)", 0.0, 60.0,  8.0, 0.5, "b_14")
+            BIO15 = dual_input(col3, "BIO15 - Precip Seasonality",       0.0,160.0, 80.0, 1.0, "b_15")
+            BIO16 = dual_input(col3, "BIO16 - Precip Wettest Qtr (mm)",  0.0,1200.0,570.0,5.0, "b_16")
+            BIO17 = dual_input(col3, "BIO17 - Precip Driest Qtr (mm)",   0.0, 200.0, 30.0,1.0, "b_17")
+            BIO18 = dual_input(col3, "BIO18 - Precip Warmest Qtr (mm)",  0.0, 700.0,350.0,5.0, "b_18")
+            BIO19 = dual_input(col3, "BIO19 - Precip Coldest Qtr (mm)",  0.0, 600.0,140.0,5.0, "b_19")
 
-    tmax_lag1 = dual_input(sb, "Temp Max lag-1 (°C)", 19.0, 40.0, temp_max, 0.1, "l_tmax1")
-    tmax_lag2 = dual_input(sb, "Temp Max lag-2 (°C)", 19.0, 40.0, temp_max, 0.1, "l_tmax2")
-    tmax_lag3 = dual_input(sb, "Temp Max lag-3 (°C)", 19.0, 40.0, temp_max, 0.1, "l_tmax3")
+        with col4:
+            # Previous months precip / temp for lags
+            st.markdown("### 🕑 Lagged Climate")
+            precip_lag1 = dual_input(col4, "Precip lag-1 (mm)", 0.0, 820.0, precip, 1.0, "l_precip1")
+            precip_lag2 = dual_input(col4, "Precip lag-2 (mm)", 0.0, 820.0, precip, 1.0, "l_precip2")
+            precip_lag3 = dual_input(col4, "Precip lag-3 (mm)", 0.0, 820.0, precip, 1.0, "l_precip3")
 
-    soil_lag1 = dual_input(sb, "Soil Moist lag-1", 0.0, 0.51, soil_moist, 0.01, "l_soil1")
-    soil_lag2 = dual_input(sb, "Soil Moist lag-2", 0.0, 0.51, soil_moist, 0.01, "l_soil2")
-    soil_lag3 = dual_input(sb, "Soil Moist lag-3", 0.0, 0.51, soil_moist, 0.01, "l_soil3")
+            tmin_lag1 = dual_input(col4, "T_Min lag-1 (°C)", 5.0, 28.0, temp_min, 0.1, "l_tmin1")
+            tmin_lag2 = dual_input(col4, "T_Min lag-2 (°C)", 5.0, 28.0, temp_min, 0.1, "l_tmin2")
+            tmin_lag3 = dual_input(col4, "T_Min lag-3 (°C)", 5.0, 28.0, temp_min, 0.1, "l_tmin3")
 
-    # Agricultural / Socio-economic
-    sb.markdown("### 🌾 Agriculture & Population")
-    mrice_area  = sb.number_input("Maha Rice Area (ha)",    0, 120000, 26544)
-    mrice_yield = sb.number_input("Maha Rice Yield (kg/ha)",0,   7000,  3998)
-    srice_area  = sb.number_input("Yala Rice Area (ha)",    0,  70000, 14912)
-    srice_yield = sb.number_input("Yala Rice Yield (kg/ha)",0,   7000,  3699)
-    population  = sb.number_input("Population",          80000,2400000, 823742)
-    households  = sb.number_input("Households",          19000, 660000, 213132)
+            tmax_lag1 = dual_input(col4, "T_Max lag-1 (°C)", 19.0, 40.0, temp_max, 0.1, "l_tmax1")
+            tmax_lag2 = dual_input(col4, "T_Max lag-2 (°C)", 19.0, 40.0, temp_max, 0.1, "l_tmax2")
+            tmax_lag3 = dual_input(col4, "T_Max lag-3 (°C)", 19.0, 40.0, temp_max, 0.1, "l_tmax3")
 
-    pop_per_hh = population / max(households, 1)
-
-    # BioClim 
-    sb.markdown("### 🌍 Bio Climatic Variables")
-    BIO2  = dual_input(sb, "BIO2  - Diurnal Range (°C)",       4.0, 20.0, 9.0,  0.1, "b_2")
-    BIO3  = dual_input(sb, "BIO3  - Isothermality",            0.2,  0.7, 0.42, 0.01, "b_3")
-    BIO4  = dual_input(sb, "BIO4  - Temp Seasonality",         0.0,400.0, 90.0, 1.0, "b_4")
-    BIO13 = dual_input(sb, "BIO13 - Precip Wettest Month (mm)",0.0,500.0,230.0, 1.0, "b_13")
-    BIO14 = dual_input(sb, "BIO14 - Precip Driest Month (mm)", 0.0, 60.0,  8.0, 0.5, "b_14")
-    BIO15 = dual_input(sb, "BIO15 - Precip Seasonality",       0.0,160.0, 80.0, 1.0, "b_15")
-    BIO16 = dual_input(sb, "BIO16 - Precip Wettest Qtr (mm)",  0.0,1200.0,570.0,5.0, "b_16")
-    BIO17 = dual_input(sb, "BIO17 - Precip Driest Qtr (mm)",   0.0, 200.0, 30.0,1.0, "b_17")
-    BIO18 = dual_input(sb, "BIO18 - Precip Warmest Qtr (mm)",  0.0, 700.0,350.0,5.0, "b_18")
-    BIO19 = dual_input(sb, "BIO19 - Precip Coldest Qtr (mm)",  0.0, 600.0,140.0,5.0, "b_19")
+            soil_lag1 = dual_input(col4, "Soil Moist lag-1", 0.0, 0.51, soil_moist, 0.01, "l_soil1")
+            soil_lag2 = dual_input(col4, "Soil Moist lag-2", 0.0, 0.51, soil_moist, 0.01, "l_soil2")
+            soil_lag3 = dual_input(col4, "Soil Moist lag-3", 0.0, 0.51, soil_moist, 0.01, "l_soil3")
 
     # Rolling precip / soil
     precip_roll3 = (precip + precip_lag1 + precip_lag2) / 3
