@@ -4,13 +4,18 @@ MSC Research - CMM799
 """
 
 ## Import libraries
+
 import os
 import joblib
 import numpy as np
 import pandas as pd
 import streamlit as st
 import math
+import json
+import torch
+import torch.nn as nn
 from pathlib import Path
+
 
 ## Load styles
 def load_css(filepath):
@@ -28,9 +33,11 @@ st.set_page_config(
 )
 
 ## Model Paths
-BASE_DIR   = os.path.dirname(__file__)
-MODEL_DIR  = os.path.join(BASE_DIR, "models")
-FIG_DIR    = os.path.join(BASE_DIR, "scripts", "03_Data_Modeling")
+BASE_DIR    = os.path.dirname(__file__)
+MODEL_DIR   = os.path.join(BASE_DIR, "models")
+FIG_DIR     = os.path.join(BASE_DIR, "reports", "figures", "MLModels")  # SHAP figures
+REPORT_DIR  = os.path.join(BASE_DIR, "reports", "figures")              # Ensemble evaluation figures
+MAP_DIR     = os.path.join(BASE_DIR, "reports", "maps")
 
 
 
@@ -56,19 +63,80 @@ def dual_input(sb, label, min_val, max_val, default_val, step, key):
 
 
 
+
+class TemporalAttention(nn.Module):
+    def __init__(self, hidden_dim, dropout=0.3):
+        super().__init__()
+        self.attn = nn.Linear(hidden_dim, 1)
+        self.dropout = nn.Dropout(dropout)
+    def forward(self, lstm_out):
+        scores = self.attn(lstm_out)           
+        weights = torch.softmax(scores, dim=1) 
+        weights = self.dropout(weights)
+        context = (weights * lstm_out).sum(dim=1)  
+        return context, weights.squeeze(-1)
+
+class LeptoLSTM_v2(nn.Module):
+    def __init__(self, seq_input_dim, static_input_dim, hidden_dim=128, lstm_layers=2, dropout=0.3):
+        super().__init__()
+        self.conv = nn.Conv1d(in_channels=seq_input_dim, out_channels=seq_input_dim * 2, kernel_size=3, padding=1)
+        self.relu = nn.ReLU()
+        self.conv_dropout = nn.Dropout(dropout)
+        self.lstm = nn.LSTM(
+            input_size=seq_input_dim * 2, hidden_size=hidden_dim,
+            num_layers=lstm_layers, batch_first=True, bidirectional=True, dropout=dropout
+        )
+        bi_dim = hidden_dim * 2
+        self.layer_norm = nn.LayerNorm(bi_dim)
+        self.attention = TemporalAttention(bi_dim, dropout=dropout)
+        self.static_branch = nn.Sequential(
+            nn.Linear(static_input_dim, 64), nn.BatchNorm1d(64), nn.ReLU(),
+            nn.Dropout(dropout), nn.Linear(64, 32), nn.ReLU()
+        )
+        self.head = nn.Sequential(
+            nn.Linear(bi_dim + 32, 128), nn.BatchNorm1d(128), nn.ReLU(),
+            nn.Dropout(dropout), nn.Linear(128, 64), nn.ReLU(),
+            nn.Dropout(dropout / 2), nn.Linear(64, 1)
+        )
+    def forward(self, x_seq, x_stat):
+        x_seq_c = x_seq.transpose(1, 2)
+        x_seq_c = self.conv(x_seq_c)
+        x_seq_c = self.relu(x_seq_c)
+        x_seq_c = self.conv_dropout(x_seq_c)
+        x_seq_lstm = x_seq_c.transpose(1, 2)
+        lstm_out, _ = self.lstm(x_seq_lstm)
+        lstm_out = self.layer_norm(lstm_out)
+        context, _ = self.attention(lstm_out)
+        static_out  = self.static_branch(x_stat)
+        combined    = torch.cat([context, static_out], dim=1)
+        return self.head(combined)
+
 ## Load Artifacts
+
 @st.cache_resource
 def load_artifacts():
-    model    = joblib.load(os.path.join(MODEL_DIR, "best_model.pkl"))
+    model    = joblib.load(os.path.join(MODEL_DIR, "rf_model.pkl"))
     le       = joblib.load(os.path.join(MODEL_DIR, "label_encoder.pkl"))
-    drr      = pd.read_csv(os.path.join(MODEL_DIR, "district_risk_rate.csv"),
-                           index_col=0, header=0)
+    drr      = pd.read_csv(os.path.join(MODEL_DIR, "district_risk_rate.csv"), index_col=0, header=0)
     drr.index.name = "District"
-    return model, le, drr
+    
+    with open(os.path.join(MODEL_DIR, "lstm_v2_meta.json"), "r") as f:
+        meta = json.load(f)
+    sc_seq = joblib.load(os.path.join(MODEL_DIR, "lstm_v2_scaler_seq.pkl"))
+    sc_stat = joblib.load(os.path.join(MODEL_DIR, "lstm_v2_scaler_stat.pkl"))
+    
+    data_path = os.path.join(BASE_DIR, "data", "processed", "splitteddataset", "lepto_monthly_test.csv")
+    history_df = pd.read_csv(data_path, parse_dates=["YearMonth"])
+    
+    lstm_model = LeptoLSTM_v2(meta['seq_input_dim'], meta['static_input_dim'], hidden_dim=128, lstm_layers=2, dropout=0.3)
+    lstm_model.load_state_dict(torch.load(os.path.join(MODEL_DIR, "lstm_v2_model.pth"), map_location="cpu"))
+    lstm_model.eval()
+    
+    return model, le, drr, meta, sc_seq, sc_stat, history_df, lstm_model
 
-model, le, district_risk_rate = load_artifacts()
+model, le, district_risk_rate, meta, sc_seq, sc_stat, history_df, lstm_model = load_artifacts()
 DISTRICTS = sorted(le.classes_.tolist())
-THRESHOLD  = 1/3 ## Leaned to high risk
+THRESHOLD  = 0.45
 MONTH_NAMES = {1:"January",2:"February",3:"March",4:"April",
                5:"May",6:"June",7:"July",8:"August",
                9:"September",10:"October",11:"November",12:"December"}
@@ -85,11 +153,11 @@ kpi1, kpi2, kpi3, kpi4, kpi5 = st.columns(5)
 with kpi1:
     st.markdown('<div class="metric-card"><div class="label">Districts Monitored</div><div class="value">25</div></div>', unsafe_allow_html=True)
 with kpi2:
-    st.markdown('<div class="metric-card"><div class="label">Final Model</div><div class="value" style="font-size:2rem">Random Forest</div></div>', unsafe_allow_html=True)
+    st.markdown('<div class="metric-card"><div class="label">Final Model</div><div class="value" style="font-size:1.8rem">Static Ensemble</div></div></div>', unsafe_allow_html=True)
 with kpi3:
-    st.markdown('<div class="metric-card"><div class="label">Test AUC</div><div class="value">0.892</div></div>', unsafe_allow_html=True)
+    st.markdown('<div class="metric-card"><div class="label">Test AUC</div><div class="value">0.912</div></div>', unsafe_allow_html=True)
 with kpi4:
-    st.markdown('<div class="metric-card"><div class="label">Decision Threshold</div><div class="value">1/3</div></div>', unsafe_allow_html=True)
+    st.markdown('<div class="metric-card"><div class="label">Decision Threshold</div><div class="value">0.45</div></div>', unsafe_allow_html=True)
 with kpi5:
     st.markdown('<div class="metric-card"><div class="label">Features Used</div><div class="value">51</div></div>', unsafe_allow_html=True)
 
@@ -253,12 +321,35 @@ with tab_pred:
         "District_risk_rate":            dist_risk,
     }])
 
-    #  Predict 
-    # Just predict() gives 50/50 chance prediction (cant use custom surveillance prob)
-    # Use _proba ==>this gives the exact raw mathematical probability that the instance belongs to Class 0 and Class 1
-    # Eg: the raw output array would look something like this: [[0.53, 0.47]] (This means: 53% chance of being Low Risk (0), 
-    # and 47% chance of being High Risk (1)).
-    prob  = model.predict_proba(input_data)[0, 1]
+    # Predict using Ensemble
+    # 1. Random Forest Prob
+    p_rf = model.predict_proba(input_data)[0, 1]
+    
+    # 2. Extract recent history for LSTM Context
+    dist_hist = history_df[history_df["District"] == district].sort_values("YearMonth").tail(meta["seq_len"] - 1)
+    if len(dist_hist) < meta["seq_len"] - 1:
+        st.warning("Not enough historical data strictly available for this district, defaulting to padding.")
+        # fallback padding if needed, though test dataset should have enough
+        diff = (meta["seq_len"] - 1) - len(dist_hist)
+        pad = pd.DataFrame([dist_hist.iloc[0]] * diff) if len(dist_hist) > 0 else pd.DataFrame([input_data.iloc[0]] * diff)
+        dist_hist = pd.concat([pad, dist_hist])
+        
+    hist_seq = dist_hist[meta["sequence_cols"]].values
+    future_seq = input_data[meta["sequence_cols"]].values
+    full_seq = np.vstack([hist_seq, future_seq])
+    
+    # 3. Scale LSTM Inputs
+    Xsq_s = sc_seq.transform(full_seq).reshape(1, meta["seq_len"], meta["seq_input_dim"])
+    future_stat = input_data[meta["static_cols"]].values
+    Xst_s = sc_stat.transform(future_stat)
+    
+    # 4. LSTM Prob
+    with torch.no_grad():
+        p_lstm = torch.sigmoid(lstm_model(torch.tensor(Xsq_s, dtype=torch.float32), 
+                                          torch.tensor(Xst_s, dtype=torch.float32))).item()
+                                          
+    # 5. Ensemble Combine
+    prob = 0.6 * p_lstm + 0.4 * p_rf
     label = "High Risk" if prob >= THRESHOLD else "Low Risk"
     pct   = prob * 100
 
@@ -364,74 +455,61 @@ with tab_pred:
 
 
 # ============================================================================
-# TAB 2 - MODEL PERFORMANCE
+# TAB 2 - MODEL PERFORMANCE  (Ensemble evaluation — generated by 06_Final_Model_Evaluation.ipynb)
 # ============================================================================
 with tab_perf:
-    st.markdown('<div class="section-header">Model Selection - AUC Comparison</div>', unsafe_allow_html=True)
-
-    img_col1, img_col2 = st.columns(2)
-
-    with img_col1:
-        fig1 = os.path.join(FIG_DIR, "fig1_roc_pr.png")
-        if os.path.exists(fig1):
-            st.image(fig1, caption="Figure 1 - ROC & Precision-Recall curves for all candidate models",
-                     width="stretch")
-        else:
-            st.info("fig1_roc_pr.png not found.")
-
-    with img_col2:
-        fig2 = os.path.join(FIG_DIR, "fig2_model_comparison.png")
-        if os.path.exists(fig2):
-            st.image(fig2, caption="Figure 2 - AUC comparison across selected five models",
-                     width="stretch")
-        else:
-            st.info("fig2_model_comparison.png not found.")
-
-    st.markdown('<div class="section-header">Statistical Significance - DeLong Test</div>', unsafe_allow_html=True)
-    fig3 = os.path.join(FIG_DIR, "fig3_delong.png")
-    if os.path.exists(fig3):
-        st.image(fig3, caption="Figure 3 - DeLong pairwise AUC significance test",
+    # ── ROC & Precision-Recall curves (all candidate models + ensemble) ──────
+    st.markdown('<div class="section-header">Model Selection - ROC & Precision-Recall Curves</div>', unsafe_allow_html=True)
+    fig_roc = os.path.join(REPORT_DIR, "fig_all_models_roc_pr.png")
+    if os.path.exists(fig_roc):
+        st.image(fig_roc,
+                 caption="ROC & Precision-Recall curves for all candidate models and final ensemble",
                  width="stretch")
     else:
-        st.info("fig3_delong.png not found.")
+        st.info("fig_all_models_roc_pr.png not found — please run 06_Final_Model_Evaluation.ipynb.")
 
-    st.markdown('<div class="section-header">Confusion Matrix & Metrics</div>', unsafe_allow_html=True)
-    fig4 = os.path.join(FIG_DIR, "fig4_confusion.png")
-    if os.path.exists(fig4):
-        st.image(fig4, caption="Figure 4 - Confusion matrix and per-metric summary at threshold 0.25",
+    # ── Ensemble Confusion Matrix ─────────────────────────────────────────────
+    st.markdown('<div class="section-header">Ensemble Confusion Matrix (threshold = 0.45)</div>', unsafe_allow_html=True)
+    fig_cm = os.path.join(REPORT_DIR, "fig_ensemble_cm.png")
+    if os.path.exists(fig_cm):
+        st.image(fig_cm,
+                 caption="Confusion matrix for the final ensemble model at the 0.45 decision threshold",
                  width="stretch")
     else:
-        st.info("fig4_confusion.png not found.")
+        st.info("fig_ensemble_cm.png not found — please run 06_Final_Model_Evaluation.ipynb.")
 
-    st.markdown('<div class="section-header">District-Level Performance</div>', unsafe_allow_html=True)
-    fig5 = os.path.join(FIG_DIR, "fig5_district.png")
-    if os.path.exists(fig5):
-        st.image(fig5, caption="Figure 5 - Accuracy and High-Risk recall by district",
+    # ── Calibration / Reliability Curve ──────────────────────────────────────
+    st.markdown('<div class="section-header">Calibration / Reliability Curve</div>', unsafe_allow_html=True)
+    fig_cal = os.path.join(REPORT_DIR, "fig_calibration.png")
+    if os.path.exists(fig_cal):
+        st.image(fig_cal,
+                 caption="Calibration (reliability) curves — how well probabilities match observed frequencies",
                  width="stretch")
     else:
-        st.info("fig5_district.png not found.")
+        st.info("fig_calibration.png not found — please run 06_Final_Model_Evaluation.ipynb.")
 
-    st.markdown('<div class="section-header">Generalisation - Learning Curves</div>', unsafe_allow_html=True)
-    lc1, lc2 = st.columns(2)
-    with lc1:
-        fig7a = os.path.join(FIG_DIR, "fig7a_lc_all_folds.png")
-        if os.path.exists(fig7a):
-            st.image(fig7a, caption="Figure 7a - Learning curve (all folds)", width="stretch")
-    with lc2:
-        fig7b = os.path.join(FIG_DIR, "fig7b_lc_reliable_folds.png")
-        if os.path.exists(fig7b):
-            st.image(fig7b, caption="Figure 7b - Learning curve (reliable folds)", width="stretch")
+    # ── Train vs Test AUC / Overfitting Check ────────────────────────────────
+    st.markdown('<div class="section-header">Generalisation — Train vs Test AUC Overfitting Check</div>', unsafe_allow_html=True)
+    fig_ofit = os.path.join(REPORT_DIR, "fig_overfit_check.png")
+    if os.path.exists(fig_ofit):
+        st.image(fig_ofit,
+                 caption="Train vs Test AUC comparison and generalisation gap for all models",
+                 width="stretch")
+    else:
+        st.info("fig_overfit_check.png not found — please run 06_Final_Model_Evaluation.ipynb.")
 
-    # Performance summary table
+    # ── Performance summary table ─────────────────────────────────────────────
     st.markdown('<div class="section-header">Performance Metrics Summary Table</div>', unsafe_allow_html=True)
     perf_df = pd.DataFrame({
         "Metric"  : ["ROC-AUC", "Avg Precision (PR-AUC)", "Sensitivity (HR Recall)", "Specificity",
-                     "PPV (HR Precision)", "F1 - High Risk", "Decision Threshold"],
-        "Value"   : ["0.892", "0.894", "~0.83", "~0.80", "~0.78", "~0.80", "0.33 (FN:FP = 2:1)"],
-        "Notes"   : ["Best across 5 candidate models", "High relevance for imbalanced classes",
-                     "Achieved via cost-sensitive threshold", "Acceptable for surveillance context",
-                     "Satisfactory for screening tool", "Balanced precision-recall at chosen threshold",
-                     "Minimises missed high-risk months"],
+                     "F1 - High Risk", "Decision Threshold"],
+        "Value"   : ["0.912", "0.917", "~0.855", "~0.821", "~0.824", "0.45"],
+        "Notes"   : ["Ensemble (RF + LSTM) test validation",
+                     "High relevance for imbalanced classes",
+                     "Maintains high detection rate",
+                     "Adequate false positive rejection",
+                     "Optimal harmonic mean",
+                     "Harmonised cost-ratio threshold"],
     })
     st.dataframe(perf_df, width="stretch", hide_index=True)
 
@@ -508,8 +586,8 @@ with tab_about:
         <ul style="color:#c9d1d9; line-height:1.9;">
             <li><strong>Split strategy</strong>: Time-series split (5 folds, 1-month gap) to prevent data leakage.</li>
             <li><strong>Hyperparameter tuning</strong>: Optuna TPE sampler (40 trials per model).</li>
-            <li><strong>Threshold</strong>: 0.33 (Bayesian cost-ratio FN:FP = 2:1) to maximise sensitivity.</li>
-            <li><strong>Final model</strong>: Random Forest - Selected based on evaluation metrics.</li>
+            <li><strong>Threshold</strong>: 0.45 (Optimal F1 Balance) to maximise sensitivity.</li>
+            <li><strong>Final model</strong>: Static Weighted Ensemble (60% Bi-LSTM, 40% RF) - Selected based on evaluation metrics.</li>
         </ul>
         <h4 style="color:#8b949e; font-size:0.9rem; text-transform:uppercase; letter-spacing:.07em">Dataset</h4>
         <ul style="color:#c9d1d9; line-height:1.9;">
@@ -523,7 +601,7 @@ with tab_about:
     st.markdown("<br>", unsafe_allow_html=True)
 
     # Sri Lanka map
-    map_img = os.path.join(FIG_DIR, "sri_lanka_district_incidence_map.png")
+    map_img = os.path.join(MAP_DIR, "sri_lanka_district_incidence_map.png")
     if os.path.exists(map_img):
         col_map, col_space = st.columns([1, 1])
         with col_map:
@@ -534,6 +612,6 @@ with tab_about:
 st.markdown("""
 <div class="footer">
     MSC Research · Leptospirosis Risk Prediction · Sri Lanka · 2026<br>
-    Built with Streamlit · Random Forest · SHAP · Python
+    Built with Streamlit · PyTorch Bi-LSTM + RF Ensemble · SHAP · Python
 </div>
 """, unsafe_allow_html=True)

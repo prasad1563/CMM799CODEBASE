@@ -58,8 +58,8 @@
   ],
   "seq_input_dim": 33,
   "static_input_dim": 19,
-  "threshold": 0.3333333333333333,
-  "test_auc": 0.895,
-  "test_ap": 0.8901,
-  "sensitivity": 0.9865
+  "threshold": 0.45,
+  "test_auc": 0.902,
+  "test_ap": 0.908,
+  "sensitivity": 0.8559
 }
