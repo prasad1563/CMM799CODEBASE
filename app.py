@@ -603,6 +603,12 @@ with tab_about:
                 <li><strong>Statistical Significance:</strong> The proposed ensemble was mathematically validated against robust baselines using DeLong's Test, achieving a project-leading <strong>91.2% Test ROC-AUC</strong>.</li>
                 <li><strong>Feature Space:</strong> Utilizes 51 distinct sociodemographic, climate, agricultural (paddy yield matrices), and lagged bio-climatic characteristics spanning all 25 districts of Sri Lanka.</li>
             </ul>
+            <h4 style="color:#8b949e; font-size:0.9rem; text-transform:uppercase; letter-spacing:.07em; margin-top:20px;">Dataset Specifications</h4>
+            <ul style="color:#c9d1d9; line-height:1.9;">
+                <li><strong>Geographical Scope:</strong> Monthly time-steps mapped across all 25 administrative districts of Sri Lanka.</li>
+                <li><strong>Data Volume:</strong> 5,100 total temporal observations (Training Set: 3,900 samples · Held-out Test Set: 1,200 samples).</li>
+                <li><strong>Dimensionality:</strong> 51 dynamic and static features (Meteorological, Soil Moisture, Agricultural Census, BioClimatic indicators, and engineered temporal lags).</li>
+            </ul>
         </div>
         """, unsafe_allow_html=True)
 
