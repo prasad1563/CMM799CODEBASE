@@ -37,7 +37,7 @@ BASE_DIR    = os.path.dirname(__file__)
 MODEL_DIR   = os.path.join(BASE_DIR, "models")
 FIG_DIR     = os.path.join(BASE_DIR, "reports", "figures", "MLModels")  # SHAP figures
 REPORT_DIR  = os.path.join(BASE_DIR, "reports", "figures")              # Ensemble evaluation figures
-MAP_DIR     = os.path.join(BASE_DIR, "scripts", "03_Data_Modeling")
+MAP_DIR     = os.path.join(BASE_DIR, "scripts", "maps")
 
 
 
@@ -572,31 +572,23 @@ with tab_shap:
 with tab_about:
     st.markdown("""
     <div style="background:#161b22; border:1px solid #30363d; border-radius:12px; padding:28px; max-width:860px;">
-        <h3 style="color:#58a6ff; margin-top:0">About This Project</h3>
+        <h3 style="color:#58a6ff; margin-top:0">About This Research</h3>
         <p style="color:#c9d1d9; line-height:1.8;">
-            This dashboard presents the outputs of a Master of Science research project focused on
-            <strong>district-level predictive modelling of Leptospirosis incidence in Sri Lanka</strong>.
+            This prototype serves as the operational artefact for a Master of Science research project focusing on 
+            <strong>spatiotemporal early-warning predictive modelling of Leptospirosis incidence in Sri Lanka</strong>. 
+            It translates complex epidemiological data and machine learning architectures into an accessible interface for public health stakeholders.
         </p>
-        <h4 style="color:#8b949e; font-size:0.9rem; text-transform:uppercase; letter-spacing:.07em">Research Objectives</h4>
+        <h4 style="color:#8b949e; font-size:0.9rem; text-transform:uppercase; letter-spacing:.07em; margin-top:20px;">System Architecture</h4>
         <ul style="color:#c9d1d9; line-height:1.9;">
-            <li>Build a monthly, district-level binary classifier to distinguish <em>High-Risk</em> from <em>Low-Risk</em> months.</li>
-            <li>Incorporate climatic, temporal, agricultural, and epidemiological lag features.</li>
-            <li>Evaluate multiple candidate classifiers (Logistic Regression, Random Forest, XGBoost, LightGBM, CatBoost) with time-series cross-validation.</li>
-            <li>Select the best model using statistical testing (DeLong AUC comparison) and a cost-sensitive decision threshold.</li>
-            <li>Explain model predictions using SHAP values to ensure interpretability for public health practitioners.</li>
+            <li><strong>Predictive Engine:</strong> A calibrated Hybrid Ensemble integrating state-of-the-art Deep Learning (Bidirectional LSTM with Temporal Attention) to capture sequential memory, combined with a Random Forest meta-classifier (40% weight) to handle complex cross-sectional interactions.</li>
+            <li><strong>Decision Logic:</strong> Optimised at an early-warning threshold of <strong>0.45</strong> to prioritise system Sensitivity (Recall), ensuring high-risk outbreak scenarios are reliably detected with minimal false negatives.</li>
+            <li><strong>Explainable AI (XAI):</strong> Integrated SHAP (SHapley Additive exPlanations) visualizations to provide transparent, interpretable risk drivers (such as temporal incidence lags and climatic anomalies).</li>
         </ul>
-        <h4 style="color:#8b949e; font-size:0.9rem; text-transform:uppercase; letter-spacing:.07em">Modelling Approach</h4>
+        <h4 style="color:#8b949e; font-size:0.9rem; text-transform:uppercase; letter-spacing:.07em; margin-top:20px;">Research Validation</h4>
         <ul style="color:#c9d1d9; line-height:1.9;">
-            <li><strong>Split strategy</strong>: Time-series split (5 folds, 1-month gap) to prevent data leakage.</li>
-            <li><strong>Hyperparameter tuning</strong>: Optuna TPE sampler (40 trials per model).</li>
-            <li><strong>Threshold</strong>: 0.45 (Optimal F1 Balance) to maximise sensitivity.</li>
-            <li><strong>Final model</strong>: Static Weighted Ensemble (60% Bi-LSTM, 40% RF) - Selected based on evaluation metrics.</li>
-        </ul>
-        <h4 style="color:#8b949e; font-size:0.9rem; text-transform:uppercase; letter-spacing:.07em">Dataset</h4>
-        <ul style="color:#c9d1d9; line-height:1.9;">
-            <li>25 districts x monthly time steps.</li>
-            <li>Train: 3,900 samples · Test: 1,200 samples.</li>
-            <li>51 features: climate, soil, agriculture, population, BioClim, and engineered lag/rolling features.</li>
+            <li><strong>Methodology:</strong> Evaluated using Strict Time-Series splits with sliding window cross-validation to rigorously prevent look-ahead bias and temporal data leakage.</li>
+            <li><strong>Statistical Significance:</strong> The proposed ensemble was mathematically validated against robust baselines using DeLong's Test, achieving a project-leading <strong>91.2% Test ROC-AUC</strong>.</li>
+            <li><strong>Feature Space:</strong> Utilizes 51 distinct sociodemographic, climate, agricultural (paddy yield matrices), and lagged bio-climatic characteristics spanning all 25 districts of Sri Lanka.</li>
         </ul>
     </div>
     """, unsafe_allow_html=True)
